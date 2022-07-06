@@ -1,7 +1,7 @@
 import random
 
 # NUMBER_OF_CLIENTS: Number of client agents
-NUMBER_OF_CLIENTS = 3
+NUMBER_OF_CLIENTS = 2
 client_names = ['client_agent' + str(i) for i in range(NUMBER_OF_CLIENTS)]
 
 # LEN_PER_ITERATION: How many datapoints each client gets per iteration (starts at 0). On iteration i, each client has (i+1) * LEN_PER_ITERATION samples
