@@ -1,7 +1,6 @@
-import json, ast
+import json
 import socket
 import numpy as np
-from struct import unpack
 import copy
 import time
 
@@ -50,9 +49,6 @@ class Client(Agent):
         final_weights, final_intercepts = copy.deepcopy(weights), copy.deepcopy(intercepts)
 
         message = {'weights': final_weights, 'intercepts': final_intercepts, 'iter': iteration}
-        # print(message)
-        # print(self.conn)
-        # self.conn.send(json.dumps(message).encode())
 
         # Message serialized
         messageString = json.dumps(message, cls=NumpyEncoder)
@@ -67,45 +63,39 @@ class Client(Agent):
 
     def compute_weights(self, iteration):
         X, y = self.train_datasets[str(iteration + 1)]
+
         lr = SGDClassifier(alpha=0.0001, loss="log", random_state=config.RANDOM_SEEDS[self.name][iteration])
-        lr.fit(X, y)
+
+        # Assign prev round coefficients
+        if iteration > 0:
+            federated_weights = copy.deepcopy(self.federated_weights[iteration - 1])
+            federated_intercepts = copy.deepcopy(self.federated_intercepts[iteration - 1])
+        else:
+            federated_weights = None
+            federated_intercepts = None
+
+        lr.fit(X, y, coef_init=federated_weights, intercept_init=federated_intercepts)
         local_weights = lr.coef_
         local_intercepts = lr.intercept_
+
         return local_weights, local_intercepts
-
-        # X, y = self.train_datasets[str(iteration + 1)]
-
-        # lr = SGDClassifier(alpha=0.0001, loss="log", random_state=config.RANDOM_SEEDS[self.name][iteration])
-
-        # # Assign prev round coefficients
-        # if iteration > 0:
-        #     federated_weights = copy.deepcopy(self.federated_weights[iteration])
-        #     federated_intercepts = copy.deepcopy(self.federated_intercepts[iteration])
-        # else:
-        #     federated_weights = None
-        #     federated_intercepts = None
-
-        # lr.fit(X, y, coef_init=federated_weights, intercept_init=federated_intercepts)
-        # local_weights = lr.coef_
-        # local_intercepts = lr.intercept_
-
-        # return local_weights, local_intercepts
     
     def receive_weights(self, message):
-        body = message.body
-        iteration, return_weights, return_intercepts = body['iteration'], body['return_weights'], body['return_intercepts']
+        iteration, averaged_weights, averaged_intercepts = message['iteration'], message['averaged_weights'][str(self.agent_id)], message['averaged_intercepts'][str(self.agent_id)]
+        averaged_weights = np.asarray(averaged_weights)
+        averaged_intercepts = np.asarray(averaged_intercepts)
 
-        return_weights = copy.deepcopy(return_weights)
-        return_intercepts = copy.deepcopy(return_intercepts)
+        averaged_weights = copy.deepcopy(averaged_weights)
+        averaged_intercepts = copy.deepcopy(averaged_intercepts)
 
-        self.federated_weights[iteration] = return_weights
-        self.federated_intercepts[iteration] = return_intercepts
+        self.federated_weights[iteration] = averaged_weights
+        self.federated_intercepts[iteration] = averaged_intercepts
 
         personal_weights = self.personal_weights[iteration]
         personal_intercepts = self.personal_intercepts[iteration]
 
         personal_accuracy = self.evaluator.accuracy(personal_weights, personal_intercepts)
-        federated_accuracy = self.evaluator.accuracy(return_weights, return_intercepts)
+        federated_accuracy = self.evaluator.accuracy(averaged_weights, averaged_intercepts)
 
         self.personal_accuracy[iteration] = personal_accuracy
         self.federated_accuracy[iteration] = federated_accuracy
@@ -146,7 +136,7 @@ if __name__ == '__main__':
     conn.connect(('192.168.222.128', port))
 
     initMessage = json.loads(conn.recv(1024))
-    print(initMessage)
+    
     id = initMessage["id"]
     length = initMessage["length"]
     
@@ -164,18 +154,10 @@ if __name__ == '__main__':
 
         client.produce_weights(produceWegihtMessage)
 
-        # length = json.loads(conn.recv(1024))["length"]
-        # length = json.loads(conn.recv(1024))
-        # print("\n!!!!!\nlength: ", length)
-        # length = length["length"]
+        length = json.loads(conn.recv(1024))["length"]
 
-        # averageMessage = receiveMessage(client.conn, length)
+        averageMessage = receiveMessage(client.conn, length)
+        client.receive_weights(averageMessage)
 
-        # averaged_weights = averageMessage["averaged_weights"]
-        # averaged_intercepts = averageMessage["averaged_intercepts"]
-        # print(averaged_intercepts)
-
-    message = input("Input> ").encode()
-    conn.send(message)
     # close the connection
     conn.close()
