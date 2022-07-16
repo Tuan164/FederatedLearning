@@ -81,7 +81,8 @@ class Client(Agent):
         return local_weights, local_intercepts
     
     def receive_weights(self, message):
-        iteration, averaged_weights, averaged_intercepts = message['iteration'], message['averaged_weights'][str(self.agent_id)], message['averaged_intercepts'][str(self.agent_id)]
+        iteration = message['iteration']
+        averaged_weights, averaged_intercepts = message['averaged_weights'][str(iteration)], message['averaged_intercepts'][str(iteration)]
         averaged_weights = np.asarray(averaged_weights)
         averaged_intercepts = np.asarray(averaged_intercepts)
 
@@ -135,8 +136,9 @@ if __name__ == '__main__':
     # Connect to the server on local computer
     conn.connect(('192.168.222.128', port))
 
-    initMessage = json.loads(conn.recv(1024))
+    initMessage = json.loads(conn.recv(28))
     
+    print("init: ", initMessage)
     id = initMessage["id"]
     length = initMessage["length"]
     
@@ -149,13 +151,12 @@ if __name__ == '__main__':
     client = Client(id, conn, train_datasets, X_test, y_test)
 
     for i in range(config.ITERATIONS):
-        produceWegihtMessage = json.loads(conn.recv(1024))
+        produceWegihtMessage = json.loads(conn.recv(16))
         print(produceWegihtMessage)
 
         client.produce_weights(produceWegihtMessage)
-
-        length = json.loads(conn.recv(1024))["length"]
-
+        
+        length = json.loads(conn.recv(18))["length"]
         averageMessage = receiveMessage(client.conn, length)
         client.receive_weights(averageMessage)
 

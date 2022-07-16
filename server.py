@@ -3,6 +3,7 @@ import threading
 import socket
 import json
 import numpy as np
+import multiprocessing
 from multiprocessing.pool import ThreadPool
 import time
 
@@ -14,10 +15,28 @@ from sklearn.preprocessing import MinMaxScaler
 from sklearn.datasets import load_digits
 
 isListen = True
+currentClient = 0
 
-def client_weights_returner(inp):
-    client_instance, message = inp
-    client_instance.receive_weights(message)
+def receiveWeightMessage(args):
+    conn, iteration = args
+    message = {"iteration": iteration}
+    time.sleep(0.1)
+    conn.send(json.dumps(message).encode())
+
+    produceWeightsMessage = json.loads(conn.recv(26))
+    
+    id = produceWeightsMessage["id"]
+    length = produceWeightsMessage["length"]
+    
+    messageDict = receiveMessage(conn, length)
+    return (id, messageDict)
+
+def sendAvarageMessage(args):
+    conn, averageMessage, messageString = args
+    time.sleep(0.1)
+    conn.sendall(json.dumps(averageMessage).encode())
+    time.sleep(0.1)
+    conn.sendall(messageString.encode())
 
 class Server(Agent):
     def __init__(self, agent_id):
@@ -34,12 +53,11 @@ class Server(Agent):
 
         # Message serialized
         messageString = json.dumps(message, cls=NumpyEncoder)
-        
         initMessage = {
             "id": id,
             "length": len(messageString)
         }
-
+        
         conn.sendall(json.dumps(initMessage).encode())
         conn.sendall(messageString.encode())
     
@@ -50,18 +68,15 @@ class Server(Agent):
             weights = {}
             intercepts = {}
 
-            for conn in conns:
-                message = {"iteration": i}
-                conn.send(json.dumps(message).encode())
-
-                produceWeightsMessage = json.loads(conn.recv(1024))
-                
-                id = produceWeightsMessage["id"]
-                length = produceWeightsMessage["length"]
-                
-                messageDict = receiveMessage(conn, length)
+            with ThreadPool(currentClient) as calling_pool:
+                args = []
+                for conn in conns:
+                    args.append((conn, i))
+                    
+                id, messageDict = calling_pool.map(receiveWeightMessage, args)[0]
                 weights[id] = np.array(messageDict['weights'])
                 intercepts[id] = np.array(messageDict['intercepts'])
+
             
             weights_np = list(weights.values()) # the weights for this iteration!
             intercepts_np = list(intercepts.values())
@@ -89,10 +104,15 @@ class Server(Agent):
                 "length": len(messageString)
             }
             
-            for conn in conns:
-                conn.sendall(json.dumps(averageMessage).encode())
-                time.sleep(0.5)
-                conn.sendall(messageString.encode())
+            # for conn in conns:
+            #     conn.sendall(json.dumps(averageMessage).encode())
+            #     conn.sendall(messageString.encode())
+            
+            with ThreadPool(currentClient) as calling_pool:
+                args = []
+                for conn in conns:
+                    args.append((conn, averageMessage, messageString))
+                calling_pool.map(sendAvarageMessage, args)
 
         for conn in conns:
             conn.close()   
@@ -119,7 +139,7 @@ def federatedLearning(server, conn, addr, data, currentClient):
     
     print(f"[NEW CONNECTION] {addr} connected.")
 
-    server.initModel(conn=conn, id=currentClient, train_datasets=data[4], X_test=data[1], y_test=data[3])
+    server.initModel(conn=conn, id=currentClient - 1, train_datasets=data[4], X_test=data[1], y_test=data[3])
     while isListen:
         pass
 
@@ -129,16 +149,20 @@ def listen(server, data):
     requestValueFlag = True
 
     while isListen:
+        global currentClient
+
         # Establish connection with client.
         conn, addr = listener.accept()
         conns.append(conn)
-        currentClient = threading.activeCount() - 1     
+        currentClient = threading.activeCount()
         thread = threading.Thread(target=federatedLearning, args = (server, conn, addr, data, currentClient))
         thread.start()
-        print(f"[ACTIVE CONNECTIONS] {currentClient + 1}")
-        if (currentClient + 1 == 1 and requestValueFlag):
+
+        print(f"[ACTIVE CONNECTIONS] {currentClient}")
+        if (currentClient == 2 and requestValueFlag):
             requestValueFlag = False
-            time.sleep(1)
+            time.sleep(0.1)
+
             server.requestValues(conns, config.ITERATIONS)
 
 def receiveMessage(conn, length):
