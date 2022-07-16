@@ -57,7 +57,7 @@ class Server(Agent):
             "id": id,
             "length": len(messageString)
         }
-        
+
         conn.sendall(json.dumps(initMessage).encode())
         conn.sendall(messageString.encode())
     
@@ -159,7 +159,7 @@ def listen(server, data):
         thread.start()
 
         print(f"[ACTIVE CONNECTIONS] {currentClient}")
-        if (currentClient == 2 and requestValueFlag):
+        if (currentClient == 3 and requestValueFlag):
             requestValueFlag = False
             time.sleep(0.1)
 
